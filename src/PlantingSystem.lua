@@ -1,4 +1,4 @@
--- PlantingSystem.lua
+-- PlantingSystem.lua (IMPROVED)
 -- Handles planting seeds in garden plots
 
 local PlantingSystem = {}
@@ -6,24 +6,28 @@ local PlantingSystem = {}
 -- Plant data configuration
 local PLANTS = {
 	Tomato = {
-		growthTime = 30, -- seconds
+		growthTime = 5, -- 5 seconds for testing (change to 30 for actual game)
 		harvestValue = 10,
-		displayName = "Tomato"
+		displayName = "Tomato",
+		color = Color3.fromRGB(255, 0, 0)
 	},
 	Carrot = {
-		growthTime = 45,
+		growthTime = 10,
 		harvestValue = 15,
-		displayName = "Carrot"
+		displayName = "Carrot",
+		color = Color3.fromRGB(255, 165, 0)
 	},
 	Sunflower = {
-		growthTime = 60,
+		growthTime = 15,
 		harvestValue = 25,
-		displayName = "Sunflower"
+		displayName = "Sunflower",
+		color = Color3.fromRGB(255, 215, 0)
 	},
 	Pumpkin = {
-		growthTime = 90,
+		growthTime = 20,
 		harvestValue = 50,
-		displayName = "Pumpkin"
+		displayName = "Pumpkin",
+		color = Color3.fromRGB(255, 140, 0)
 	}
 }
 
@@ -43,7 +47,7 @@ function PlantingSystem:plantSeed(plot, plantType)
 	
 	-- Check if plot is already occupied
 	if plot:GetAttribute("Occupied") then
-		warn("Plot is already occupied")
+		warn("Plot is already occupied!")
 		return false
 	end
 	
@@ -55,20 +59,27 @@ function PlantingSystem:plantSeed(plot, plantType)
 	plot:SetAttribute("PlantedTime", tick())
 	plot:SetAttribute("GrowthTime", plantData.growthTime)
 	
-	-- Create visual representation of seed
+	-- Create visual representation of seed (LARGER and MORE VISIBLE)
 	local seed = Instance.new("Part")
-	seed.Name = "Seed"
+	seed.Name = "Seed_" .. plantType
 	seed.Shape = Enum.PartType.Ball
-	seed.Size = Vector3.new(0.5, 0.5, 0.5)
+	seed.Size = Vector3.new(0.8, 0.8, 0.8) -- Larger seed
 	seed.Color = Color3.fromRGB(139, 69, 19) -- Brown color
 	seed.CanCollide = false
-	seed.CFrame = plot.CFrame + Vector3.new(0, 0.5, 0)
+	seed.TopSurface = Enum.SurfaceType.Smooth
+	seed.BottomSurface = Enum.SurfaceType.Smooth
+	
+	-- Position seed on top of plot
+	local plotCenter = plot.Position
+	local plotTop = plot.Position.Y + (plot.Size.Y / 2)
+	seed.Position = Vector3.new(plotCenter.X, plotTop + 0.5, plotCenter.Z)
 	seed.Parent = plot
 	
 	-- Tag the seed so we can track it
 	seed:SetAttribute("IsSeed", true)
+	seed:SetAttribute("PlantType", plantType)
 	
-	print("Planted " .. plantData.displayName .. " in plot. Growth time: " .. plantData.growthTime .. " seconds")
+	print("✓ Planted " .. plantData.displayName .. " in plot. Growth time: " .. plantData.growthTime .. " seconds")
 	
 	-- Start growth process
 	self:startGrowth(plot, seed, plantData)
@@ -78,19 +89,21 @@ end
 
 -- Function to handle plant growth
 function PlantingSystem:startGrowth(plot, seed, plantData)
+	if not seed or not seed.Parent then return end
+	
 	local startTime = tick()
 	local growthTime = plantData.growthTime
+	local connection
 	
 	-- Loop to simulate growth
-	local connection
 	connection = game:GetService("RunService").Heartbeat:Connect(function()
-		if not plot or not plot.Parent then
-			connection:Disconnect()
+		if not seed or not seed.Parent or not plot or not plot.Parent then
+			if connection then connection:Disconnect() end
 			return
 		end
 		
 		local elapsedTime = tick() - startTime
-		local growthProgress = elapsedTime / growthTime
+		local growthProgress = math.min(elapsedTime / growthTime, 1)
 		
 		if growthProgress >= 1 then
 			-- Plant is fully grown
@@ -98,15 +111,18 @@ function PlantingSystem:startGrowth(plot, seed, plantData)
 			connection:Disconnect()
 		else
 			-- Update seed size during growth
-			local newSize = 0.5 + (growthProgress * 1.5)
+			local newSize = 0.8 + (growthProgress * 1.5)
 			seed.Size = Vector3.new(newSize, newSize, newSize)
 			
-			-- Change color as it grows (brown -> green)
-			local greenAmount = growthProgress
+			-- Change color as it grows (brown -> plant color)
+			local r = 139 - (139 * growthProgress) + (plantData.color.R * 255 * growthProgress)
+			local g = 69 + (131 * growthProgress)
+			local b = 19 - (19 * growthProgress)
+			
 			seed.Color = Color3.fromRGB(
-				139 - (139 * greenAmount),
-				69 + (131 * greenAmount),
-				19
+				math.floor(r),
+				math.floor(g),
+				math.floor(b)
 			)
 		end
 	end)
@@ -114,30 +130,32 @@ end
 
 -- Function to complete plant growth
 function PlantingSystem:completeGrowth(plot, seed, plantData)
+	if not seed or not seed.Parent then return end
+	
 	-- Change seed to plant model
-	seed.Name = "Plant"
+	seed.Name = "Plant_" .. plantData.displayName
 	seed.Shape = Enum.PartType.Block
-	seed.Size = Vector3.new(1, 2, 1)
-	seed.Color = Color3.fromRGB(34, 139, 34) -- Forest green
+	seed.Size = Vector3.new(1.2, 2, 1.2)
+	seed.Color = plantData.color -- Use plant's natural color
 	seed:SetAttribute("IsPlant", true)
 	seed:SetAttribute("IsSeed", false)
 	
 	-- Update plot attribute
 	plot:SetAttribute("ReadyToHarvest", true)
 	
-	-- Add touch detection for harvesting
-	local humanoidTouched = false
+	print("✓ " .. plantData.displayName .. " is ready to harvest!")
+	
+	-- Add touch detection for harvesting (one-time only)
+	local harvested = false
 	seed.Touched:Connect(function(hit)
-		if humanoidTouched then return end
+		if harvested then return end
 		
 		local humanoid = hit.Parent:FindFirstChild("Humanoid")
 		if humanoid then
-			humanoidTouched = true
+			harvested = true
 			self:harvestPlant(plot, seed, plantData)
 		end
 	end)
-	
-	print(plantData.displayName .. " is ready to harvest!")
 end
 
 -- Function to harvest a plant
@@ -146,9 +164,9 @@ function PlantingSystem:harvestPlant(plot, plant, plantData)
 		return
 	end
 	
-	-- Award currency (you can integrate with your currency system)
+	-- Award currency
 	local harvestValue = plantData.harvestValue
-	print("Harvested " .. plantData.displayName .. " for " .. harvestValue .. " currency")
+	print("✓ Harvested " .. plantData.displayName .. " for " .. harvestValue .. " currency!")
 	
 	-- Remove the plant
 	plant:Destroy()
@@ -157,9 +175,7 @@ function PlantingSystem:harvestPlant(plot, plant, plantData)
 	plot:SetAttribute("Occupied", false)
 	plot:SetAttribute("PlantType", nil)
 	plot:SetAttribute("ReadyToHarvest", false)
-	
-	-- You can add code here to award currency to the player
-	-- Example: player.leaderstats.Currency.Value += harvestValue
+	plot.Color = Color3.fromRGB(139, 105, 20) -- Back to original dirt color
 	
 	return harvestValue
 end
